@@ -5,6 +5,8 @@ from socket import *
 import _thread as thread
 from threading import Thread
 import pickle
+import time
+import random
 
 '''
     #Utility functions: 1) to create a packet of 1472 bytes with header (12 bytes) (sequence number, acknowledgement number,
@@ -42,7 +44,12 @@ create_package(seq, acknr, flags, win, data)
                 ack = Acknowledge, a flag that can either be 0 or 1 informing the other part that the previous message was recieved
                 fin = Finished, a flag that can be either 0 or 1 informing the other part that this is the last message sent
                 reset = Reset, never used...
-        win = Window size, the size of the buffer size the server has to operate with. Whenever server sends a packet this should be 6400, otherwise 0.
+        win = Window size, the size of the buffer size the server has to operate with. Whenever server sends a packet this should be 5, otherwise 0.
+
+Extract data from file
+    with open('checkerboard.jpg', 'rb') as f:
+        # Read 1460 bytes from the image file
+        data = f.read(1460)
 """
 
 from struct import *
@@ -67,7 +74,7 @@ def create_packet(seq, ack, flags, win, data):
     #once we create a header, we add the application data to create a packet
     #of 1472 bytes
     packet = header + data
-    print (f'packet containing header + data of size {len(packet)}') #just to show the length of the packet
+    #print (f'Create_packet(72): packet containing header + data, is {len(packet)} bytes long') #just to show the length of the packet
     return packet
 
 
@@ -123,7 +130,7 @@ def test_ack_packet():
     #let's mimic an acknowledgment packet from the receiver-end
     #now let's create a packet with acknowledgement number 1
     #an acknowledgment packet from the receiver should have no data
-    #only the header with acknowledgment number, ack_flag=1, win=6400
+    #only the header with acknowledgment number, ack_flag=1, win=5
     data = b'' 
     print('\n\nCreating an acknowledgment packet:')
     print (f'this is an empty packet with no data ={len(data)}')
@@ -262,7 +269,7 @@ def client_go_back_n(sock, address, data):
     eot_pkt = create_packet(base_seq_num, -1, 1, window_size, b'')
     send_packet(sock, eot_pkt, address)
 '''
-def selective_repeat():
+def server_selective_repeat():
     return 0
 def client_selective_repeat():
     return 0
@@ -353,7 +360,7 @@ def clientSyncer(client_sd, recvWord, sendWord):         # may need to remove th
                                 
 
 def server(arguments): 
-    serverSocket = socket(AF_INET, SOCK_DGRAM) 
+    serverSocket = socket(AF_INET, SOCK_DGRAM)
     try:
         serverSocket.bind((str(arguments.bind), arguments.port))   
     except:
@@ -364,60 +371,76 @@ def server(arguments):
     while True: #an infinite loop
         data = serverSocket.recv(2048)  #recieve message with pickle with client-options
         client_options = pickle.loads(data) #retrieves the client-options (unpacking)
-        
 
         #Three-way-handshake
-        client_syn = serverSocket.recv(1000)
-        header_from_msg = client_syn[:12]
-        seq, ack, flags, win = parse_header(header_from_msg)
-        syn, ack, fin = parse_flags(flags)
-        if syn > 0:
-            print("client wants to sync")
-            msg = create_packet(0, 1, 12, 0, b"")
-            serverSocket.sendto(msg, (str(client_options.serverip), arguments.port))
-            client_ack = serverSocket.recv(1000)
-            header_from_client_ack = client_ack[:12]
-            seq, ack, flags, win = parse_header(header_from_client_ack)
-            syn, ack, fin = parse_flags(flags)
-        else:
-            raise ConnectionError("Three-way-handshake unsuccessful")
-        
+        time_out = 1
+        serverSocket.settimeout(int(time_out))
 
-        #if test som velger hvilken modus serveren skal kjøre i
-        if client_options.reliability == "gbn":
-            print("The client chose Go back N")
-            go_back_n()
-        elif client_options.reliability == "saw":
-            print("The client chose Stop and wait")
-            stop_and_wait()
-        elif client_options.reliability == "sr":
-            print("the client chose selective repeat")
-            selective_repeat()
+        client_syn, clientAddress = serverSocket.recvfrom(1000)
+        header_from_msg = client_syn[:12]
+        seq, acknr, flags, win = parse_header(header_from_msg)
+        syn, ack, fin = parse_flags(flags)
+        print("\nServer: Header information from recieved SYN package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
+                  "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
+        
+        if syn > 0 and ack == 0 and fin == 0 and seq == 1 and acknr == 0:
+            msg = create_packet(2, 1, 12, 0, b'')
+            serverSocket.sendto(msg, clientAddress)
+            client_ack, clientAddress = serverSocket.recvfrom(1000)
+            header_from_client_ack = client_ack[:12]
+            seq, acknr, flags, win = parse_header(header_from_client_ack)
+            syn, ack, fin = parse_flags(flags)
+            print("Server: Header information from recieved ACK package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
+                  "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
+            if ack > 0 and syn == 0 and fin == 0 and seq == 3 and acknr == 2:
+                break
+            else:
+                raise ConnectionError("ACK-message from client unsuccsessful")
+        else:
+            raise ConnectionError("SYN-request from client unsuccsessful")
+
+    #if test som velger hvilken modus serveren skal kjøre i
+    if client_options.reliability == "gbn":
+        print("The client chose Go back N")
+        client_go_back_n()
+    elif client_options.reliability == "saw":
+        print("The client chose Stop and wait")
+        client_stop_and_wait()
+    elif client_options.reliability == "sr":
+        print("the client chose selective repeat")
+        client_selective_repeat()
 
 def client(arguments):
     clientSocket = socket(AF_INET, SOCK_DGRAM)
-    data_string=pickle.dumps(arguments)
+    data_string = pickle.dumps(arguments)
     clientSocket.sendto(data_string, (str(arguments.serverip), arguments.port))
-    
 
-    #Three-way-handshake
-    seq_number = 1
-    ack_number = 0
-    flags = 8       # 1 0 0 0 = 8 in binary
-    win = 0
-    data = b""
-    msg = create_packet(seq_number, ack_number, flags, win, data)
+    # Three-way-handshake
+    time_out = 10
+    clientSocket.settimeout(int(time_out))
+    msg = create_packet(1, 0, 8, 0, b'')  # SYN message
     clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
-    msg = clientSocket.recv(1000)
-    header_from_msg = msg[:12]
-    seq, ack, flags, win = parse_header(header_from_msg)
-    syn, ack, fin = parse_flags(flags)
-    if syn > 0 and ack > 0:
-        print("server sendt SYN:ACK")
-        msg = create_packet(2, 1, 8, 0, b"")
-        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
-
-
+    while True:
+        try:
+            message, serverAddress = clientSocket.recvfrom(2048)  # SYN-ACK message
+            header_from_msg = message[:12]
+            seq, acknr, flags, win = parse_header(header_from_msg)
+            syn, ack, fin = parse_flags(flags)
+            print("\nClient: Header information from recieved SYN:ACK package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
+                  "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
+            
+            if syn > 0 and ack > 0 and fin == 0 and seq == 2 and acknr == 1: # Check if sequence number matches.
+                seq += 1
+                acknr += 1
+                break  
+        except timeout:
+            raise ConnectionError("SYN-ACK from server unsuccessful")
+    print("seq:", seq, "acknr", acknr)        
+    msg = create_packet(seq, acknr, 4, 0, b'')  # ACK message
+    clientSocket.sendto(msg, serverAddress)
+    # Successfull 3 way handshake completed.
+    
+    #Figuring out which reliability function the transfer is going to use
     if arguments.reliability == "gbn":
             print("The client chose Go back N")
             client_go_back_n()

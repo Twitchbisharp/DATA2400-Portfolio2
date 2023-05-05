@@ -364,14 +364,15 @@ def client_go_back_n(clientSocket, address, data):
 ################# FILIP START ##################
 def server_selective_repeat(serverSocket, arguments, client_options):
     print("Server Selective Repeat")
-    window_size = 5
+    window_size = client_options.windowSize
     fin = 0
     allMessages = []
-    seq = 0
+    #seq = 0
     reciever = (None, None)
-    while fin != 1:
+    while fin != 2:
         print("New window of 5 packets created")
         i = 1
+        seq = 0
         window_messages = [None] * window_size
         while i%(window_size+1):                            #får 5 data-packets og plasserer dem i riktig index i window_messages
             msg, reciever = serverSocket.recvfrom(2048)
@@ -388,7 +389,7 @@ def server_selective_repeat(serverSocket, arguments, client_options):
                 window_messages[oldseq+diff-1] = msg
             i+=1
             
-            print(window_messages)
+            #print(window_messages)
         #allMessages.extend(window_messages)
         #print(allMessages)
         
@@ -405,8 +406,7 @@ def server_selective_repeat(serverSocket, arguments, client_options):
                 syn, ackflag, fin = parse_flags(flags)
                 print("Recieved retransmit seq:", seq)
                 window_messages[seq-1] = retransmit                             #setter msg på riktig plass i allMessages, må bruke seq-1 for indexering
-                
-                reack = create_packet(0,seq,0,window_size, b'')
+                reack = create_packet(0,seq,fin,window_size, b'')
                 serverSocket.sendto(reack, reciever)
                 errors-=1
             errors = 0
@@ -420,13 +420,21 @@ def server_selective_repeat(serverSocket, arguments, client_options):
                 else:                   #most entered
                     seq, ack, flags, win = parse_header(window_messages[j-1][:12])
                     syn, ackflag, fin = parse_flags(flags)
-                    msg = create_packet(0,seq, 8, 5, b'')
+                    msg = create_packet(0,seq, fin, client_options.windowSize, b'')
                     serverSocket.sendto(msg, reciever)
                     print("sent:", j)
                 j+=1
         allMessages.extend(window_messages)
-        print(window_messages)
+        #print(window_messages)
         print("finished sending acks\n")
+        print("flags:", flags, "\n\tsyn:", syn, "ack", ackflag,"fin", fin)
+    datalist = []
+    for i in allMessages:
+        data = i[12:]
+        datalist.append(data)
+    with open(arguments.destination, 'w') as f:   
+        for i in datalist:
+            f.write(str(repr(i)[2:-1]))
     
     
     
@@ -465,27 +473,38 @@ def server_selective_repeat(serverSocket, arguments, client_options):
 def client_selective_repeat(clientSocket, arguments):
     print("Client Selective Repeat")
     fin = 0
-    while fin != 1:
+    roundnr = 1
+    datalength = 0
+    while fin != 2:
         print("\nFIN ==", fin)
         sent_packets = [None] * 5
         counter = 1
         seq = 1
         #sending data
         while counter%6 != 0:
+            with open(arguments.file, "rb") as image:
+                f = image.read()[datalength:(datalength+1460)]
+                b = bytes(f)
+                print("From:", datalength, "To:", datalength+1460, "Difference:", (datalength+1460)-(datalength))
+                print("b sin length", len(b))
+                if len(b) < 1460:
+                    fin = 2
+                datalength += 1460
             ok = True
             while ok:
                 #deliberate seq nr
-                delibSeqNr = [1,1,1,1,1]        #cannot, send seq 0
+                delibSeqNr = [1,2,3,4,5]        #cannot, send seq 0
                 seq = delibSeqNr[counter-1]
                 #random seq nr
                 #seq = int(round(random.random()*6, 0))
                 if seq < 6 and seq > 0:
                     ok = False
-            msg = create_packet(seq, 0, 0, 5, bytes(seq+1))
+            msg = create_packet(seq, 0, fin, arguments.windowSize, b)
             clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
             sent_packets[seq-1]
             print("sent packet nr:", counter, "with seqnr.", seq)
             counter+=1
+
         
         #Recieving acks
         j = 0
@@ -519,7 +538,7 @@ def client_selective_repeat(clientSocket, arguments):
                 if prevDoubleAck == ack:
                     print("forrige double skjer igjen")
                     doubleCounter += 1
-                    sent_packets[ack] = create_packet(ack+doubleCounter, 0, 0, 0,b'retransmitted')
+                    sent_packets[ack] = create_packet(ack+doubleCounter, 0, fin, 0,b'retransmitted')
                     clientSocket.sendto(sent_packets[ack], reciever)
                     print("Resent packet with index", ack, "i.e. ack", ack+doubleCounter)
                     reack = clientSocket.recv(2048)
@@ -527,7 +546,7 @@ def client_selective_repeat(clientSocket, arguments):
                     syn, flagack, fin = parse_flags(flags)
                     recieved_acks[counter-1] = ack
                 else:   #vanligst
-                    sent_packets[ack] = create_packet(ack+1, 0, 0, 0, b'retransmitted')
+                    sent_packets[ack] = create_packet(ack+1, 0, fin, 0, b'retransmitted')
                     clientSocket.sendto(sent_packets[ack], reciever)
                     print("resent packet with index", ack, "i.e. ack", ack+1)
                     reack = clientSocket.recv(2048)
@@ -536,13 +555,15 @@ def client_selective_repeat(clientSocket, arguments):
                     doubleCounter = 1       # må resette denne når andre acknr blir doble
             elif ack == 0:
                 print("first packet got dropped")
-                sent_packets[ack] = create_packet(ack+1, 0, 0, 0, b'retransmitted')
+                sent_packets[ack] = create_packet(ack+1, 0, fin, 0, b'retransmitted')
                 clientSocket.sendto(sent_packets[ack], reciever)
                 reack = clientSocket.recv(2048)
                 seq, acknr, flags, win = parse_header(reack)
                 recieved_acks[counter-1] = ack
         print("recieved_acks:", recieved_acks)
-        fin += 1
+        roundnr += 1
+        
+        #fin += 1
         
     
         ##TODO: 
@@ -619,7 +640,12 @@ def check_ip(val):
 def check_file(val):
     #Check-code goes here (vet ikke om dette er nødvendig i det hele tatt)
     return val
-                      
+
+def check_windowSize(val):
+    if val < 5 and val > 15:
+        raise argparse.ArgumentTypeError("The windowsize should only be between 5 and 15")
+    else:
+        return val
 
 def server(arguments): 
     serverSocket = socket(AF_INET, SOCK_DGRAM)
@@ -724,9 +750,10 @@ parser.add_argument("-p", "--port", default="8088", type=check_port, help="Alloc
 parser.add_argument("-I", "--serverip", type=check_ip, default="127.0.0.1", help="Set IP-address of server from client")        #Client specific
 parser.add_argument("-b", "--bind", type=check_ip, default="127.0.0.1", help="Set IP-address that client can connect to")       #Server specific
 
+parser.add_argument("-w", "--windowSize", type=check_windowSize, default=5, help="Specify window size")
 parser.add_argument("-r", "--reliability", type=str, choices=("gbn", "saw", "sr"), default=None, help="Choose reliability-mode")                #Client specific
-parser.add_argument("-f", "--file", type=check_file, default="default.jpg", help="Choose file to send over")                    #Client specific
-
+parser.add_argument("-f", "--file", type=check_file, default="checkerboard.jpg", help="Choose file to send over")                    #Client specific
+parser.add_argument("-d", "--destination", type=str, default="text.txt", help="Choose destination file")
 
 arguments=parser.parse_args()       #gathers all the options into a list
 

@@ -6,8 +6,7 @@ import _thread as thread
 from threading import Thread
 import pickle
 import time
-import random
-import math
+import os
 
 '''
     #Utility functions: 1) to create a packet of 1472 bytes with header (12 bytes) (sequence number, acknowledgement number,
@@ -222,144 +221,113 @@ def client_stop_and_wait(clientSocket, arguments):
     #placeholder
     return 0
 
+################### WILLIAM START ###################
+#SERVER
+def server_go_back_n(serverSocket, arguments, client_options):
+    print("Server Go-Back-N")
+    print("New window count: 1")
 
-#Genie AI
-'''
-def go_back_n(data, clientSocket, connectionSocket):
-    # Set up socket
-    sock = connectionSocket
-    sock.settimeout(0.5)
+    window_size = client_options.windowSize
+    fin = 0
+    allMessages = []
+    seqnr = 0
+    new_window = 1
 
-    window_size = 5
-    base = 1
-    next_seq_num = 1
+    while fin != 2:
+        print("New window of " + str(window_size) + " packets created")
+        window_messages = [None] * window_size
 
-    # Split data into packets
-    packets = [data[i:i+10] for i in range(0, len(data), 10)]
+        for i in range(window_size):
+            try:
+                msg, reciever = serverSocket.recvfrom(2048)
+            except timeout:
+                print("timeout")
+                break
 
-    while base <= len(packets):
-        # Send packets within window
-        while next_seq_num < base + window_size and next_seq_num <= len(packets):
-            packet = str(next_seq_num) + packets[next_seq_num-1]
-            sock.sendto(packet.encode(), clientSocket)
-            next_seq_num += 1
+            seq, ack, flags, win = parse_header(msg[:12])
+            syn, ackflag, fin = parse_flags(flags)
 
-        try:
-            # Receive ACKs
-            data, clientSocket = sock.recvfrom(1024)
-            ack = int(data.decode())
-            if ack >= base:
-                base = ack + 1
-        except socket.timeout:
-            # Timeout - retransmit packets
-            next_seq_num = base
-    sock.close()
-'''
-#WINDOW_SIZE = 6400
-#BUFFER_SIZE = 4096 (recv-value ellerno)
-'''
-def client_go_back_n(sock, address, data):
-    n_packets = len(data)
-    next_seq_num = 0
-    base_seq_num = 0
-    window_size = min(WINDOW_SIZE, n_packets)
+            #ACK DROP
+            if seq == 2:
+                print("\n\nDropped ACK packet for nr 2")
+                continue
+                     
+            window_messages[i] = msg 
+            seqnr += 1
 
-    while base_seq_num < n_packets:
-        # Send packets within the window
-        while next_seq_num < base_seq_num + window_size:
-            pkt = create_packet(next_seq_num, -1, 0, window_size, data[next_seq_num])
-            send_packet(sock, pkt, address)
-            next_seq_num += 1
-
-        # Wait for ACK with matching sequence number
-        try:
-            ack_packet, addr = sock.recvfrom(BUFFER_SIZE)
-            ack_seq_num, _, ack_flags, _, _ = parse_header(ack_packet)
-
-            # Update window based on ACK number
-            if base_seq_num <= ack_seq_num < next_seq_num:
-                base_seq_num = ack_seq_num + 1
-                window_size = min(WINDOW_SIZE, n_packets - base_seq_num)
+        print("Sending ACK for packet with seq " + str(seq))
+        ackpkt = create_packet(0, seq, 0, window_size, b'')
+        serverSocket.sendto(ackpkt, reciever)
         
-        except socket.timeout:
-            # Resend packets within the window
-            next_seq_num = base_seq_num
+        allMessages.extend(window_messages)
+        print("Finished sending ACK\n")
+        print("Flags:", flags, "\nSyn:", syn, "Ack", ackflag, "Fin", fin)
+        new_window +=1
+        print("New window count: ", str(new_window))
 
-    # Send EOT packet to signal end of transmission
-    eot_pkt = create_packet(base_seq_num, -1, 1, window_size, b'')
-    send_packet(sock, eot_pkt, address)
-'''
+    datalist = []
+    for i in allMessages:
+        if i == None:
+            continue
+        else:
+            data = i[12:]
+            datalist.append(data)
+    with open(arguments.destination, 'w') as f:   
+        for i in datalist:
+            f.write(str(repr(i)[2:-1])) 
+### CLIENT ----------------------
+def client_go_back_n(clientSocket, arguments):
+    print("Client Go-Back-N")
+    print("New window count: 1")
 
+    fin = 0
+    next_seqnum = 1
+    datalength = 0
+    sent_packets = []
+    seq = 0
+    int(seq)
+    new_window = 1
 
-
-'''
-def client_go_back_n(clientSocket, address, data):
-    print("\nClientGoBack")
-
-
-    clientSocket.settimeout(0.5)
-
-    seq = 3
-    file_data = b'checkerboard.jpg'
-    pkt = math.ceil(len(file_data) / pkt_size)
-    pkts = []
-    for i in range(pkt):
-        start = i * pkt_size
-        end = (i + 1) * pkt_size
-        data = file_data[start:end]
-        pkt_num = i + 1
-        pkt = str(pkt_num).rjust(seq, '0').encode() + file_data
-        pkts.appned(pkt)
+    while fin != 2:
+        print("\nFIN ==", fin)
+        #sent_packets = []
+        windowIndex = 1
         
-    window_size = 5
-    #pkt_size = 1460
-    
-    base = 1
+        #sending data
+        for i in range(arguments.windowSize):
+            with open(arguments.file, "rb") as name:
+                f = name.read()[datalength:(datalength+1460)]
+                b = bytes(f)
+                print("From:", datalength, "To:", datalength+1460, "Difference:", len(b), "b sin length", len(b))
+                if len(b) < 1460:
+                    fin = 2
+            datalength += 1460
+            msg = create_packet(next_seqnum, 0, fin, arguments.windowSize, b)
 
-    while base <= pkt_num:
-        for i in range(base, min(base + window_size, pkt_num + 1)):
-            clientSocket.sendto(pkts[i - 1], (str(arguments.serverip), arguments.port))
-            print(f'sent packets {i}')
-            next_seq += 1
+            clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
+            print("Sent packet nr:", next_seqnum, "with window-index.", windowIndex, "\n")
+            sent_packets.append(msg)
+            next_seqnum += 1
+            windowIndex += 1
+            seq += 1    
 
         try:
-            while True:
-                ack_pkt, serverAddress = clientSocket.recvfrom(2048)
-                ack_num = int(ack_pkt[:seq].decode())
-                print(f'received ACK for packet {ack_num}')
-                if ack_num > base:
-                    base = ack_num
-                    break
+            recpkt, reciever = clientSocket.recvfrom(2048)
+            xxxyyy, acknr, flags, win = parse_header(recpkt)
+
+            print("Recieved ACK for packet with seq " + str(seq))
         except timeout:
-            #return 0
-            print('timeout - resending packets')
-            next_seq = base
+            print("timeout, resending window")
             continue
 
-        msg = create_packet(next_seq, 0, 1, 0, b'')
-        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
-        print("sent FIN to server")
+        while acknr < next_seqnum and len(sent_packets) > 0:
+            acknr += 1
+            sent_packets.pop(0)
         
-        while True:
-            try:
-                fin_ack_pkt, serverAddress = clientSocket.recv(2048)
-                header_from_msg = fin_ack_pkt[:12]
-                seq, acknr, flags, win = parse_header(header_from_msg)
-                syn, ack, fin = parse_flags(flags)
-                print(f'received FIN ACK from server. Seq: {seq}, AckNr: {acknr}, Flags - SYN: {syn}, ACK: {ack}, FIN: {fin}')
-
-                if fin == 1 and ack == 1 and syn == 0 and seq == next_seq and acknr == pkt_num + 1:
-                    msg = create_packet(seq + 1, acknr, 0, 0, b'')
-                    clientSocket.sendto(msg, serverAddress)
-                    print("sent final ACK")
-                    break
-            except timeout:
-                print("Timed out")
-                break
-            
-        clientSocket.close()
-'''
-
+        new_window += 1
+        print("New window count: ", str(new_window))
+    print("Finished sending packets\n")
+################# WILLIAM SLUTT ###################
 
 ################# FILIP START ##################      
 def server_selective_repeat(serverSocket, arguments, client_options):
@@ -371,21 +339,24 @@ def server_selective_repeat(serverSocket, arguments, client_options):
     seq = 0
     seqnr = 0
     reciever = (None, None)
-
+    squeuer = 0
     while fin != 2:
         print("New window of 5 packets created")
         window_messages = [None] * window_size
         
         while True:
         #for i in range(window_size):
+            print("seq", seq, "seqnr", seqnr)
             if seq >= seqnr:
                 oldseq = seq
             elif seqnr > seq:
                 oldseq = seqnr
+            #
             try:
+                serverSocket.settimeout(.7)
                 msg, reciever = serverSocket.recvfrom(2048)
             except timeout:
-                print("timeout")
+                #print("timeout skal ødelegge")
                 break
             seq, ack, flags, win = parse_header(msg[:12])
             syn, ackflag, fin = parse_flags(flags)
@@ -393,8 +364,12 @@ def server_selective_repeat(serverSocket, arguments, client_options):
             print("oldseq:", oldseq, "\tseq:", seq, "\tdiff:",diff, "\n")
 
             if diff == 1:     #if this is true, the packet came in sequence
-                window_messages[seq%arguments.windowSize-1] = msg              #places msg in correct window_messages-list, indexing makes it seq-1
+                #print("seq", seq, "windowSize", arguments.windowSize)
+                #print("plassering", ((seq-1)%arguments.windowSize))
+                window_messages[((seq-1)%arguments.windowSize)] = msg              #places msg in correct window_messages-list, indexing makes it seq-1
+                #print("windowMessages",window_messages)
             else:           #packet came out of order/lost
+                #print("oldseq", oldseq, "seq", seq, "plassering:", (oldseq%arguments.windowSize)+diff-1)
                 window_messages[(oldseq%arguments.windowSize)+diff-1] = msg
             #print(window_messages[:12])
         #allMessages.extend(window_messages)
@@ -405,51 +380,61 @@ def server_selective_repeat(serverSocket, arguments, client_options):
         j=1
         errors = -1
         ack_loss_flag = True
+        
         while errors != 0:
+            #print("errors", errors)
+            #ERROR RETRANSMISSION LOOP
+            #itererer gjennom antall error
             for i in range(errors):
                 print("errors left:", errors)
-                retransmit, reciever = serverSocket.recvfrom(2048)          #får pakke på nytt fra checking for retransmission
-                seqnr, ack, flags, win = parse_header(retransmit[:12])      #henter ut seqnr
+                #får pakke på nytt fra checking for retransmission
+                retransmit, reciever = serverSocket.recvfrom(2048)          
+                #henter ut seqnr
+                seqnr, ack, flags, win = parse_header(retransmit[:12])      
                 syn, ackflag, fin = parse_flags(flags)
                 print("Recieved retransmit seq:", seqnr)
                 
-                window_messages[seqnr%arguments.windowSize-1] = retransmit                             #setter msg på riktig plass i allMessages, må bruke seq-1 for indexering
+                #oppdsaterer window-messages til å ha riktig package
+                window_messages[(seqnr%arguments.windowSize)-1] = retransmit                             #setter msg på riktig plass i allMessages, må bruke seq-1 for indexering
                 #print(retransmit)
                 
-                reack = create_packet(0,seqnr,fin,window_size, b'')
+                #lager en ack for oppdatert package
+                reack = create_packet(0,seqnr,fin,window_size, b'reack')
                 serverSocket.sendto(reack, reciever)
                 errors-=1
             errors = 0
-            while j%(window_size+1) != 0:           #itererer gjennom alle meldinger for å sjekke om de eksisterer
-                if window_messages[j-1] == None:    #if packet isn't recieved       
+            #END ERROR RETRANSMISSION LOOP
+
+            flag = True
+            #while j%(window_size+1) != 0:           #itererer gjennom alle meldinger for å sjekke om de eksisterer
+            for i in range(client_options.windowSize):
+                #print("windowMessages[0]", window_messages[0])
+                if window_messages[i] == None:    #if packet isn't recieved       
                     #retransmit call
                     retransmit = create_packet(0,seqnr,0,window_size,b'')
                     serverSocket.sendto(retransmit, reciever)
-                    print("sent error:", j)
+                    print("sent error:", i+1)
+                    #går inn i ERROR retransmission loop når vi har gått gjennom alle window_messages
                     errors +=1
-                else:                   #most entered - sending ack-message
-                    seqnr, ack, flags, win = parse_header(window_messages[j-1][:12]) #finds current seqnr
+                else:                   #Har fått package - sending regular ack
+                    seq, ack, flags, win = parse_header(window_messages[i][:12]) #finds current seqnr
                     syn, ackflag, fin = parse_flags(flags)  #oppdatering av fin
-                    msg = create_packet(0,seqnr, fin, client_options.windowSize, b'')
                     
+                    #Lager ack-header
+                    msg = create_packet(0,seq, fin, client_options.windowSize, b'')
                     
-                    #ACK_LOSS
-                    """
-                    while True:
+                    #DROP_ACK GENERATOR
+                    if flag == True and client_options.test_case == "drop_ack" and seq == 3:
+                        flag = False
+                        print("Skipped ack:", seq)
+
+                    else:
+                        #Sending packet
+                        serverSocket.sendto(msg, reciever) 
+                        print("sent:", seq)
                         
-                        if ack_loss_flag == True and client_options.test_case == "drop_ack" and j == 4:
-                            ack_loss_flag = False
-                            print("skipped acknr:", seqnr)
-                        else:
-                            try:
-                                ack_loss, reciever = serverSocket.recvfrom(2048)
-                                print("recieved ack_loss from client", ack_loss)
-                                serverSocket.sendto(msg, reciever)  #resends  ack
-                                print("sent:", j)
-                            except timeout:
-                                break
-                    """                 
-                j+=1
+              
+        squeuer+=1
         allMessages.extend(window_messages)
         #print(window_messages)
         print("finished sending acks\n")
@@ -458,7 +443,7 @@ def server_selective_repeat(serverSocket, arguments, client_options):
     for i in allMessages:
         data = i[12:]
         datalist.append(data)
-    with open(arguments.destination, 'w') as f:   
+    with open(client_options.destination, 'w') as f:   
         for i in datalist:
             f.write(str(repr(i)[2:-1]))
     
@@ -470,15 +455,17 @@ def client_selective_repeat(clientSocket, arguments):
     roundnr = 1
     datalength = 0
     seqnr = 1
-    flag = True 
+    flag = True
+    squeuer = 0
     while fin != 2:
         print("\nFIN ==", fin)
         sent_packets = [None] * 5
         windowIndex = (seqnr-1)%(arguments.windowSize)
         
-        #sending data
+        ####----------START SENDING DATA
+        #itererer gjennom listen sent_packets
         for i in sent_packets:
-            #de resterende i windowSize
+            #reads the specified file
             with open(arguments.file, "rb") as image:
                 f = image.read()[datalength:(datalength+1460)]
                 b = bytes(f)
@@ -486,78 +473,51 @@ def client_selective_repeat(clientSocket, arguments):
                 if len(b) < 1460:
                     fin = 2
             datalength += 1460
-
             
-            """#controlcheck of windowIndex
-            ok = True
-            while ok:
-                #deliberate seq nr
-                delibSeqNr = [1,2,3,4,5]        #cannot, send seq 0
-                windowIndex = delibSeqNr[(seqnr-1)%arguments.windowSize]
-                #random seq nr
-                #seq = int(round(random.random()*6, 0))
-                if windowIndex < 6 and windowIndex > 0:
-                    ok = False
-            """
-            
-            """
-            lossLock = True
-            while lossLock:    
-                try:        #checks if the server needs a retransmission for lost package
-                    lossrequest, reciever = clientSocket.recvfrom(2048)
-                    data = lossrequest[12:]
-                    if data == "loss":
-                        print("lost package triggered!!!")
-                        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) #resends lost package
-                except timeout: #server got the package
-                    print("server got the package")
-                    lossLock = False
-            """
+            #create a message
             msg = create_packet(seqnr, 0, fin, arguments.windowSize, b)
             
-            if flag == True and arguments.test_case == "loss" and seqnr == 10:
+            #PACKET LOSS GENERATOR
+            if flag == True and arguments.test_case == "loss" and seqnr == 9:
                 flag = False
                 print("Skipped packet:", seqnr, "\n")
             else:
                 clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
                 print("sent packet nr:", seqnr, "with window-index.", windowIndex, "\n")
+            #END PACKET LOSS GENERATOR
+            
+            #oppdaterer sent_packets-lista
             sent_packets[windowIndex] = msg
+            #oppdaterer windowIndex
             windowIndex = (seqnr)%(arguments.windowSize)
+            #oppdaterer seqence number
             seqnr+=1
             
         #print(sent_packets)
-
-        ###FINISH SENDING DATA
+        ###-----------FINISH SENDING DATA
         
         #Recieving acks
         j = 0
         recieved_acks = []
-        clientSocket.settimeout(.8)
+        clientSocket.settimeout(.6)
         ack = 1
-        while True:     #ack_recieving loop
-            if j == 5:
-                break
-            
-            
-            while True: # ACK_loss loop
-                
-                
-                """
-                try:        #prøver å hente ack, hvis så fortsett
+        while j < 5:     #ack_recieving loop
+            while True:
+                try:
                     message, reciever = clientSocket.recvfrom(2048)
-                    print("KOMMER JEG HIT ENGANG???")
-                    seq, ack, flags, win = parse_header(message[:12])
-                    syn, flagack, fin = parse_flags(flags)
-                    print("got acknr:", j) 
-                    j+=1
-                    recieved_acks.append(ack)
-                    print(recieved_acks)
                     break
                 except timeout:
-                    ack_loss = create_packet(seqnr,0,0,0,b'ack_loss')
-                    clientSocket.sendto(ack_loss, (str(arguments.serverip), arguments.port))
-                    print("Sent ack_loss to server")
-                """
+                    resend_ack = create_packet(ack-1,0, fin, arguments.windowSize, b'resendplz')
+                    #clientSocket.sendto(resend_ack, reciever)
+                    #print("sendt resend ack request", ack-1)
+            seq, ack, flags, win = parse_header(message[:12])
+            syn, flagack, fin = parse_flags(flags)
+            print("got acknr:", ack) 
+            j+=1
+            recieved_acks.append(ack)
+            print("Recieved_acks", recieved_acks)
+            
+
             
         #prints all acks
         print("Got all acks, doubles or not", recieved_acks)
@@ -686,7 +646,7 @@ def check_windowSize(val):
     if val < 5 and val > 15:
         raise argparse.ArgumentTypeError("The windowsize should only be between 5 and 15")
     else:
-        return val
+        return int(val)
 
 def server(arguments): 
     serverSocket = socket(AF_INET, SOCK_DGRAM)
@@ -740,12 +700,14 @@ def server(arguments):
         server_selective_repeat(serverSocket, arguments, client_options)
 
 def client(arguments):
+    start_time = time.time()
+    
     clientSocket = socket(AF_INET, SOCK_DGRAM)
     data_string = pickle.dumps(arguments)
     clientSocket.sendto(data_string, (str(arguments.serverip), arguments.port))
 
     # Three-way-handshake
-    time_out = .8
+    time_out = .5
     clientSocket.settimeout(time_out)
     msg = create_packet(1, 0, 8, 0, b'')  # SYN message
     clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
@@ -778,6 +740,22 @@ def client(arguments):
     elif arguments.reliability == "sr":
             print("the client chose selective repeat")
             client_selective_repeat(clientSocket, arguments)
+    
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Elapsed time: {elapsed_time:.3f} seconds.")
+    try:
+        pass
+    finally:
+        with open('output.txt', 'rb') as output_file:
+            byte_string = output_file.read()
+        file_size_bytes = os.path.getsize('output.txt')
+        print("FileSize: ", file_size_bytes)
+        bytes_per_second = file_size_bytes / elapsed_time
+        mBytes_per_second = bytes_per_second / 1000000
+        print(f"Bytes per second: {bytes_per_second:.2f}")
+        print(f"MegaBytes per second: {mBytes_per_second:.2f}")
 
      
     
@@ -793,8 +771,8 @@ parser.add_argument("-b", "--bind", type=check_ip, default="127.0.0.1", help="Se
 
 parser.add_argument("-w", "--windowSize", type=check_windowSize, default=5, help="Specify window size")
 parser.add_argument("-r", "--reliability", type=str, choices=("gbn", "saw", "sr"), default=None, help="Choose reliability-mode")                #Client specific
-parser.add_argument("-f", "--file", type=check_file, default="checkerboard.jpg", help="Choose file to send over")                    #Client specific
-parser.add_argument("-d", "--destination", type=str, default="text.txt", help="Choose destination file")
+parser.add_argument("-f", "--file", type=check_file, default="test.txt", help="Choose file to send over")                    #Client specific
+parser.add_argument("-d", "--destination", type=str, default="output.txt", help="Choose destination file")
 parser.add_argument("-t", "--test_case", type=str, choices=("loss", "drop_ack"), default=None, help="Choose test case")
 
 arguments=parser.parse_args()       #gathers all the options into a list

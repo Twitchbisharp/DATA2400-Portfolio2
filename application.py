@@ -177,49 +177,76 @@ def test_ack_packet():
 
 """-----------------------------------------------------------------------------------------------------"""
 
-def server_stop_and_wait(serverSocket, arguments):
-    #lag en while løkke som kjører så lenge inkommende melding ikke inkluderer et fin-flag
-    """while loop here and indent the code below"""
+def server_stop_and_wait(serverSocket, arguments, client_options):
+    print("Server Stop-and-Wait")
 
-    #server lytter etter client sin message
-    recieved_msg = serverSocket.recv(1000)
-    
-    #server henter ut de 12 første bytes, og kaller den for header
-    recieved_header = recieved_msg[:12]
-    
-    #kaller funksjonen som fordeler headeren i forskjellige deler: sequence number, acknowledgement number, flags, window size.
-    #Lager variabler som tilsvarer dette
-    seq, acknr, flags, win = parse_header(recieved_header)
-    
-    #kaller funksjonene som fordeler flags i ulike variabler
-    syn, ack, fin = parse_flags(flags)
+    fin = 0
+    seqnum = 1
+    prev_seqnum = 0
+    allMessages = []
 
-    #server skal sjekke om sequence number (seq), er riktig
-    #dvs. første gang skal den være 1, andre gang skal den være 2 osv.
-    """
-    if sequence number is correct
-        create a package with sequence number (seq) = 0, acknowledge number (ack) = recieved sequence number, bytenumber in flags, windowsize = 0, data = b''
-        send this package to the client (linje: 19)
-        update sequence number
-    else:
-        print en error melding
-    """
-    return 0
+    while fin != 2:
+        try:
+            msg, reciever = serverSocket.recvfrom(2048)
+        except timeout:
+            print("Timeout, resending ACK for packet with seq " + str(prev_seqnum))
+            ackpkt = create_packet(0, prev_seqnum, 0, 1, b'')
+            serverSocket.sendto(ackpkt, reciever)
+            continue
+        
+        seq, ack, flags, win = parse_header(msg[:12])
+        syn, ackflag, fin = parse_flags(flags)
+
+        if seq == seqnum:
+            allMessages.append(msg)
+            seqnum += 1
+            prev_seqnum = seq
+        #deliberate packet loss
+        if seq == 2:
+                print("\n\nDropped ACK packet for nr 2")
+                continue
+
+        ackpkt = create_packet(0, prev_seqnum, 0, 1, b'')
+        serverSocket.sendto(ackpkt, reciever)
+        print("Sending ACK for packet with seq " + str(prev_seqnum))
+
+    datalist = []
+    for i in allMessages:
+        data = i[12:]
+        datalist.append(data)
+    with open(arguments.destination, 'wb') as f:   
+        for i in datalist:
+            f.write(i) 
+
 def client_stop_and_wait(clientSocket, arguments):
-    """ Kode for å hente data fra en fil:
-    with open('checkerboard.jpg', 'rb') as f:
-        # Read 1460 bytes from the image file
-        data = f.read(1460)
-    """
-    
-    #lag en while løkke som looper så lenge det er data i filen
-    """while loop with the code under inside"""
-    send_packet = create_packet(1, 0, 0, 0, data)
-    clientSocket.sendto(send_packet, (str(arguments.serverip), arguments.port))
-    #når det ikke er mer data å hente ut ifra bildet, skru på fin-flagget og avslutt funksjonen
-    
-    #placeholder
-    return 0
+    print("Client Stop-and-Wait")
+
+    fin = 0
+    seqnum = 1
+    datalength = 0
+
+    while fin != 2:
+        with open(arguments.file, "rb") as name:
+            f = name.read()[datalength:(datalength+1460)]
+            b = bytes(f)
+            if len(b) < 1460:
+                fin = 2
+        datalength += 1460
+        msg = create_packet(seqnum, 0, fin, 1, b)
+
+        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
+        print("Sent packet nr:", seqnum, "\n")
+        
+        try:
+            recpkt, reciever = clientSocket.recvfrom(2048)
+            xxxyyy, acknr, flags, win = parse_header(recpkt)
+
+            print("Received ACK for packet with seq " + str(seqnum))
+            seqnum += 1
+        except timeout:
+            print("Timeout, resending packet")
+            continue
+    print("Finished sending packets\n")
 
 ################### WILLIAM START ###################
 #SERVER
@@ -447,10 +474,12 @@ def server_selective_repeat(serverSocket, arguments, client_options):
     for i in allMessages:   #Iterate through the list allMessages
         data = i[12:]       #Retireve data from packet
         datalist.append(data)   #Palce the data in datalist
-    with open(client_options.destination, 'w') as f:    #Open a new file
-        for i in datalist:                              #Iterate through the list datalis
-            f.write(str(repr(i)[2:-1]))                 #Paste the data from datalist to the new file
-    
+    #with open(client_options.destination, 'w') as f:    #Open a new file
+    #    for i in datalist:                              #Iterate through the list datalis
+    #        f.write(str(repr(i)[2:-1]))                 #Paste the data from datalist to the new file
+    with open(client_options.destination, 'wb') as f:
+        for i in datalist:
+            f.write(i)
     
 # Description
 # Client side code for reliability function Selective Repeat

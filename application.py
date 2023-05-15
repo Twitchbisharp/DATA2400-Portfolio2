@@ -9,80 +9,31 @@ import time
 import os
 import random
 import math
-
-'''
-    #Utility functions: 1) to create a packet of 1472 bytes with header (12 bytes) (sequence number, acknowledgement number,
-    #flags and receiver window) and applicaton data (1460 bytes), and 2) to parse
-    # the extracted header from the application data. 
-'''
-
-
-"""--------------------------Guide to socket communication and packet assembly/extraction-------------------------------
-Send over socket:
-clientSocket.sendto(<packagename>, (str(arguments.serverip), arguments.port))
-serversocket.sendto(<packagename>, (str(arguments.serverip), arguments.port))
-
-recieve from socket:
-<packagename> = serverSocket.recv(1000)
-
-Extract header from packet:
-<headername> = <packetname>[:12]
-
-Extract header variables from header:
-seq, acknr, flags, win = parse_header(<headername>)
-
-Extract flag variables from flags:
-syn, ack, fin = parse_flags(flags)
-
-Create a packet:
-create_package(seq, acknr, flags, win, data)
-    Arguments:
-        seq = Sequence number, the id of the package in the right order
-        acknr = Acknowledgement number, the id of the package recieved in the right order
-        flags = a number which is converted into bit-number marking the flags syn, ack, fin, reset (reset is never used)
-                for eksample:   if flags = 4, then the corresponding bit-number is 0 1 0 0. 
-                                comparing 0 1 0 0 to syn, ack, fin, reset, shows us that the ack-flag is turned on
-                syn = Syncronize, a flag that can either be 0 or 1 signaling a request to syncronize client and server
-                ack = Acknowledge, a flag that can either be 0 or 1 informing the other part that the previous message was recieved
-                fin = Finished, a flag that can be either 0 or 1 informing the other part that this is the last message sent
-                reset = Reset, never used...
-        win = Window size, the size of the buffer size the server has to operate with. Whenever server sends a packet this should be 5, otherwise 0.
-
-Extract data from file
-    with open('checkerboard.jpg', 'rb') as f:
-        # Read 1460 bytes from the image file
-        data = f.read(1460)
-
-Potential function for image extraction:
-    with open("img.png", "rb") as image:
-      f = image.read()
-      b = bytearray(f)
-      print b[0]
-
-    # Convert image to bytes
-    import PIL.Image as Image
-    pil_im = Image.fromarray(image)
-    b = io.BytesIO()
-    pil_im.save(b, 'jpeg')
-    im_bytes = b.getvalue()
-
-    
-    import base64
-    with open("t.png", "rb") as imageFile:
-        str = base64.b64encode(imageFile.read())
-        print str
-"""
-
 from struct import *
 
-# I integer (unsigned long) = 4bytes and H (unsigned short integer 2 bytes)
-# see the struct official page for more info
+"""
+Regarding GBN, the code itself is able to transfer both text and image, but that is only the case for the older version of the code. The version where we “gracefully closed the connection” did not exist.
+On the server this would be…
 
-header_format = '!IIHH'             #("(4), (4), (2), (2)")
+    data, reciever = serverSocket.recvfrom(2048) # Change this to “data = serverSocket.recv(2048)”
+    closing the connection gracefully
+        msg = create_packet(0,0,4,0,b'')
+        serverSocket.sendto(msg, reciever)
+        print("\nGracefully closed the connection")
+        serverSocket.close()
 
-#print the header size: total = 12
-#print (f'size of the header = {calcsize(header_format)}')
+On the client this would be…
 
+    closing the connection gracefully
+        finalACK = clientSocket.recv(2048)
+        syn, acknr, flags, win = parse_header(finalACK[:12])
+        seq, ack, fin = parse_flags(flags)
+        if ack == 4:
+            print("\nGracefully closed the connection")
+            clientSocket.close()
+"""
+
+header_format = '!IIHH'   
 
 def create_packet(seq, ack, flags, win, data):
     #creates a packet with header information and application data
@@ -116,69 +67,7 @@ def parse_flags(flags):
     fin = flags & (1 << 1)
     return syn, ack, fin
 
-def test_create_packet():
-    #now let's create a packet with sequence number 1
-    print ('\n\ncreating a packet')
-
-    data = b'0' * 1460
-    print (f'app data for size ={len(data)}')
-
-    sequence_number = 1
-    acknowledgment_number = 0
-    window = 0 # window value should always be sent from the receiver-side
-    flags = 0 # we are not going to set any flags when we send a data packet
-
-    #msg now holds a packet, including our custom header and data
-    msg = create_packet(sequence_number, acknowledgment_number, flags, window, data)
-
-    #now let's look at the header
-    #we already know that the header is in the first 12 bytes
-
-    header_from_msg = msg[:12]
-    print(len(header_from_msg))
-
-    #now we get the header from the parse_header function
-    #which unpacks the values based on the header_format that we specified
-    seq, ack, flags, win = parse_header (header_from_msg)
-    print(f'seq={seq}, ack={ack}, flags={flags}, recevier-window={win}')
-
-    #let's extract the data_from_msg that holds
-    #the application data of 1460 bytes
-    data_from_msg = msg[12:]
-    print (len(data_from_msg))
-
-def test_ack_packet():
-    #let's mimic an acknowledgment packet from the receiver-end
-    #now let's create a packet with acknowledgement number 1
-    #an acknowledgment packet from the receiver should have no data
-    #only the header with acknowledgment number, ack_flag=1, win=5
-    data = b'' 
-    print('\n\nCreating an acknowledgment packet:')
-    print (f'this is an empty packet with no data ={len(data)}')
-
-    sequence_number = 0
-    acknowledgment_number = 1   #an ack for the last sequnce
-    window = 0 # window value should always be sent from the receiver-side
-
-    # let's look at the last 4 bits:  S A F R
-    # 0 0 0 0 represents no flags
-    # 0 1 0 0  ack flag set, and the decimal equivalent is 4
-    flags = 4 
-
-    msg = create_packet(sequence_number, acknowledgment_number, flags, window, data)
-    print (f'this is an acknowledgment packet of header size={len(msg)}')
-
-    #let's parse the header
-    seq, acknr, flags, win = parse_header (msg) #it's an ack message with only the header
-    print(f'seq={seq}, acknr={acknr}, flags={flags}, receiver-window={win}')
-
-    #now let's parse the flag field
-    syn, ack, fin = parse_flags(flags)
-    print (f'syn_flag = {syn}, fin_flag={fin}, and ack_flag={ack}')
-
-
-"""-----------------------------------------------------------------------------------------------------"""
-
+###################### ADARSH START #####################
 def server_stop_and_wait(serverSocket, arguments, client_options):
     print("Server Stop-and-Wait")
 
@@ -203,7 +92,7 @@ def server_stop_and_wait(serverSocket, arguments, client_options):
             allMessages.append(msg)
             seqnum += 1
             prev_seqnum = seq
-        #deliberate packet loss
+        #deliberate ack loss
         if seq == 2 and client_options.test_case == "drop_ack":
                 print("\n\nDropped ACK packet for nr 2")
                 continue
@@ -236,24 +125,33 @@ def client_stop_and_wait(clientSocket, arguments):
         datalength += 1460
         msg = create_packet(seqnum, 0, fin, 1, b)
 
-        #deliberate packet loss
-        if seqnum == 3 and arguments.test_case == "loss":
+        if seqnum == 11 and arguments.test_case == "loss":
             print("Deliberate packet loss")
             seqnum +=1
-        else:
-            clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
-            print("Sent packet nr:", seqnum, "\n")
+            continue
         
+        msg = create_packet(seqnum, 0, fin, 1, b)
+        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
+        print("Sent packet nr:", seqnum, "\n")
+
+
         try:
             recpkt, reciever = clientSocket.recvfrom(2048)
-            xxxyyy, acknr, flags, win = parse_header(recpkt)
+            _, acknr, flags, win = parse_header(recpkt)
             print("Received ACK for packet with seq " + str(seqnum))
             seqnum += 1
         except timeout:
             print("Timeout, resending packet")
             clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
+            seqnum += 1
+            print ("seq er ", seqnum)
             continue
     print("Finished sending packets\n")
+    print("Client Stop-and-Wait")
+
+
+################### ADARSH END ########################
+
 
 ################### WILLIAM START ###################
 # SERVER ----------------------
@@ -311,7 +209,7 @@ def server_go_back_n(serverSocket, arguments, client_options):
     with open(arguments.destination, 'wb') as f:   
         for i in datalist:
             f.write(i) 
-### CLIENT ----------------------
+
 ### CLIENT ----------------------
 def client_go_back_n(clientSocket, arguments):
     print("Client Go-Back-N")
@@ -373,7 +271,7 @@ def client_go_back_n(clientSocket, arguments):
         
         new_window += 1
     print("Finished sending packets\n")
-################# WILLIAM SLUTT ###################
+################# WILLIAM END ###################
 
 ################# FILIP START ##################   
 # Description
@@ -633,9 +531,13 @@ def client_selective_repeat(clientSocket, arguments):
         print("-----------------------------------------------------------") #Output print
         roundnr += 1 #Updates the number of rounds the loop has been through
 
-############### FILIP SLUTT ##################
+############### FILIP END ##################
 
-
+# Description
+# Checks if the port number is valid
+# Arguments:
+#   val:        Value from the options
+# Returns:      The value if valid
 def check_port(val):                
     try:
         int(val)                    #Tests if input can be an integer
@@ -648,6 +550,11 @@ def check_port(val):
     else:
         raise argparse.ArgumentTypeError("The port number must be between 1024 and 65535") #Error-message if not between [1024, 65535]
 
+# Description
+# Checks if the IP address is valid
+# Arguments:
+#   val:        Value from the options
+# Returns:      The value if valid
 def check_ip(val):                          
     try:
         val = ipaddress.ip_address(val)     #Checks with the ipaddress import if it's a valid IP
@@ -655,17 +562,22 @@ def check_ip(val):
         raise argparse.ArgumentTypeError("IP-address syntax wrong") #Error-message if IP-syntax is wrong
     return val                              #If the test was OK, return the value
 
-
-def check_file(val):
-    #Check-code goes here (vet ikke om dette er nødvendig i det hele tatt)
-    return val
-
+# Description
+# Checks if the window size is valid
+# Arguments:
+#   val:        Value from the options
+# Returns:      The value if valid
 def check_windowSize(val):
     if int(val) < 5 and int(val) > 15:
         raise argparse.ArgumentTypeError("The windowsize should only be between 5 and 15")
     else:
         return int(val)
 
+# Description
+# Default server function. Finds out what reliability function to use
+# Arguments
+#   arguments:      List of server options
+# Returns: Nothing
 def server(arguments): 
     serverSocket = socket(AF_INET, SOCK_DGRAM)
     try:
@@ -724,6 +636,11 @@ def server(arguments):
     time.sleep(1)
     serverSocket.close()
 
+# Description
+# Default client function. Finds out what reliability function to use and measures throughput
+# Arguments
+#   arguments:      List of server options
+# Returns: Nothing
 def client(arguments):
     start_time = time.time()
     
@@ -800,7 +717,7 @@ parser.add_argument("-b", "--bind", type=check_ip, default="127.0.0.1", help="Se
 
 parser.add_argument("-w", "--windowSize", type=check_windowSize, default=5, help="Specify window size")
 parser.add_argument("-r", "--reliability", type=str, choices=("gbn", "saw", "sr"), default=None, help="Choose reliability-mode")                #Client specific
-parser.add_argument("-f", "--file", type=check_file, default="test.txt", help="Choose file to send over")                    #Client specific
+parser.add_argument("-f", "--file", type=str, default="test.txt", help="Choose file to send over")                    #Client specific
 parser.add_argument("-d", "--destination", type=str, default="output.txt", help="Choose destination file")
 parser.add_argument("-t", "--test_case", type=str, choices=("loss", "drop_ack"), default=None, help="Choose test case")
 

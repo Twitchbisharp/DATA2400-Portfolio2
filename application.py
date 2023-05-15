@@ -213,7 +213,7 @@ def server_go_back_n(serverSocket, arguments, client_options):
         else:
             data = i[12:]
             datalist.append(data)
-    with open(arguments.destination, 'wb') as f:   
+    with open(client_options.destination, 'wb') as f:   
         for i in datalist:
             f.write(i) 
         

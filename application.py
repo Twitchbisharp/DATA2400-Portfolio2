@@ -256,49 +256,51 @@ def client_stop_and_wait(clientSocket, arguments):
     print("Finished sending packets\n")
 
 ################### WILLIAM START ###################
-#SERVER
+# SERVER ----------------------
 def server_go_back_n(serverSocket, arguments, client_options):
     print("Server Go-Back-N")
-    print("New window count: 1")
+    #print("\nNew window count:  1")
 
     window_size = client_options.windowSize
     fin = 0
     allMessages = []
     seqnr = 0
     new_window = 1
-
+    print("\nNew window count: ", str(new_window))
+    
     while fin != 2:
-        print("New window of " + str(window_size) + " packets created")
+        print("New window of " + str(window_size) + " packets created\n")
         window_messages = [None] * window_size
-
+    
         for i in range(window_size):
             try:
                 msg, reciever = serverSocket.recvfrom(2048)
             except timeout:
                 print("timeout")
                 break
-
+            
             seq, ack, flags, win = parse_header(msg[:12])
             syn, ackflag, fin = parse_flags(flags)
-
-            #ACK DROP
-            if seq == 2:
-                print("\n\nDropped ACK packet for nr 2")
-                continue
-                     
+            print("HERE IS SEQ: ", seq)
             window_messages[i] = msg 
             seqnr += 1
 
-        print("Sending ACK for packet with seq " + str(seq))
-        ackpkt = create_packet(0, seq, 0, window_size, b'')
-        serverSocket.sendto(ackpkt, reciever)
+            if fin == 2:
+                break
+    
+        # send cumulative acknowledgment for last received packet
+        if window_messages[window_size - 1] is not None:
+            seq, ack, flags, win = parse_header(window_messages[window_size - 1][:12])
+            syn, ackflag, fin = parse_flags(flags)
+            ackpkt = create_packet(0, seq, 0, window_size, b'')
+            serverSocket.sendto(ackpkt, reciever)
+            print("Sending ACK for packet with seq up to " + str(seq))
         
         allMessages.extend(window_messages)
-        print("Finished sending ACK\n")
-        print("Flags:", flags, "\nSyn:", syn, "Ack", ackflag, "Fin", fin)
+        print("Finished sending ACK")
         new_window +=1
-        print("New window count: ", str(new_window))
-
+        print("\nNew window count: ", str(new_window))
+    
     datalist = []
     for i in allMessages:
         if i == None:
@@ -306,13 +308,13 @@ def server_go_back_n(serverSocket, arguments, client_options):
         else:
             data = i[12:]
             datalist.append(data)
-    with open(arguments.destination, 'w') as f:   
+    with open(arguments.destination, 'wb') as f:   
         for i in datalist:
-            f.write(str(repr(i)[2:-1])) 
+            f.write(i) 
+        
 ### CLIENT ----------------------
 def client_go_back_n(clientSocket, arguments):
     print("Client Go-Back-N")
-    print("New window count: 1")
 
     fin = 0
     next_seqnum = 1
@@ -322,44 +324,54 @@ def client_go_back_n(clientSocket, arguments):
     int(seq)
     new_window = 1
 
+    last_ack = 0
     while fin != 2:
+
         print("\nFIN ==", fin)
-        #sent_packets = []
+        print("New window count: ", str(new_window))
         windowIndex = 1
-        
         #sending data
-        for i in range(arguments.windowSize):
+        for i in range(next_seqnum, min(next_seqnum + arguments.windowSize, last_ack + arguments.windowSize + 1)):
+            seq += 1
             with open(arguments.file, "rb") as name:
                 f = name.read()[datalength:(datalength+1460)]
                 b = bytes(f)
                 print("From:", datalength, "To:", datalength+1460, "Difference:", len(b), "b sin length", len(b))
                 if len(b) < 1460:
                     fin = 2
+                    
+            #PACKET LOSS GENERATOR
+            if arguments.test_case == "loss" and seq == 8:   #If the client specified that it wants to deliberatley drop a package
+                                       
+                print("^\tThis packet is skipped (", seq,")")     #Output print
+                continue
+            #END PACKET LOSS GENERATOR
+
             datalength += 1460
-            msg = create_packet(next_seqnum, 0, fin, arguments.windowSize, b)
+            msg = create_packet(seq, 0, fin, arguments.windowSize, b)
 
             clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
-            print("Sent packet nr:", next_seqnum, "with window-index.", windowIndex, "\n")
-            sent_packets.append(msg)
-            next_seqnum += 1
-            windowIndex += 1
-            seq += 1    
+            print("Sent packet nr:", seq, "with window-index.", windowIndex, "\n")
+            sent_packets.append((i, msg))
+            windowIndex += 1   
 
         try:
             recpkt, reciever = clientSocket.recvfrom(2048)
-            xxxyyy, acknr, flags, win = parse_header(recpkt)
+            _, acknr, flags, win = parse_header(recpkt)
+            syn, ackflag, fin = parse_flags(flags)
 
-            print("Recieved ACK for packet with seq " + str(seq))
+            if acknr > last_ack:
+                last_ack = acknr
+
+            print("Recieved ACK for packet with seq up to " + str(acknr))
         except timeout:
             print("timeout, resending window")
+            print("here is seq", seq)
+            seq -= 5
+
             continue
 
-        while acknr < next_seqnum and len(sent_packets) > 0:
-            acknr += 1
-            sent_packets.pop(0)
-        
         new_window += 1
-        print("New window count: ", str(new_window))
     print("Finished sending packets\n")
 ################# WILLIAM SLUTT ###################
 
@@ -643,16 +655,15 @@ def check_ip(val):
         raise argparse.ArgumentTypeError("IP-address syntax wrong") #Error-message if IP-syntax is wrong
     return val                              #If the test was OK, return the value
 
-
 def check_file(val):
-    #Check-code goes here (vet ikke om dette er nødvendig i det hele tatt)
     return val
 
 def check_windowSize(val):
-    if int(val) < 5 and int(val) > 15:
+    int(val)
+    if val < 5 and val > 15:
         raise argparse.ArgumentTypeError("The windowsize should only be between 5 and 15")
     else:
-        return int(val)
+        return val
 
 def server(arguments): 
     serverSocket = socket(AF_INET, SOCK_DGRAM)
@@ -660,11 +671,10 @@ def server(arguments):
         serverSocket.bind((str(arguments.bind), arguments.port))   
     except:
         print("Bind failed - Wait and try again, or check if the IP-address is supported") 
-        sys.exit()                                                                         
+        sys.exit()
     
-    
-    while True: #an infinite loop
-        data, reciever = serverSocket.recvfrom(2048)  #recieve message with pickle with client-options
+    while True:
+        data = serverSocket.recv(2048)  #recieve message with pickle with client-options
         client_options = pickle.loads(data) #retrieves the client-options (unpacking)
 
         #Three-way-handshake
@@ -675,18 +685,15 @@ def server(arguments):
         header_from_msg = client_syn[:12]
         seq, acknr, flags, win = parse_header(header_from_msg)
         syn, ack, fin = parse_flags(flags)
-        #print("\nServer: Header information from recieved SYN package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
-        #          "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
         
         if syn > 0 and ack == 0 and fin == 0 and seq == 1 and acknr == 0:
-            msg = create_packet(0, 1, 12, 0, b'')       #SYN:ACK message
+            msg = create_packet(0, 1, 12, 0, b'')
             serverSocket.sendto(msg, clientAddress)
             client_ack, clientAddress = serverSocket.recvfrom(1000)
             header_from_client_ack = client_ack[:12]
             seq, acknr, flags, win = parse_header(header_from_client_ack)
             syn, ack, fin = parse_flags(flags)
-            #print("Server: Header information from recieved ACK package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
-            #      "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
+
             if ack > 0 and syn == 0 and fin == 0 and seq == 2 and acknr == 2:
                 break
             else:
@@ -698,28 +705,15 @@ def server(arguments):
     if client_options.reliability == "gbn":
         print("The client chose Go back N")
         server_go_back_n(serverSocket, arguments, client_options)
-    elif client_options.reliability == "saw":
-        print("The client chose Stop and wait")
-        server_stop_and_wait(serverSocket, arguments, client_options)
-    elif client_options.reliability == "sr":
-        print("the client chose selective repeat")
-        server_selective_repeat(serverSocket, arguments, client_options)
-    
-    #closing the connection gracefully
-    msg = create_packet(0,0,4,0,b'')
-    serverSocket.sendto(msg, reciever)
-    print("\nGracefully closed the connection")
-    serverSocket.close()
 
 def client(arguments):
     start_time = time.time()
-    
     clientSocket = socket(AF_INET, SOCK_DGRAM)
     data_string = pickle.dumps(arguments)
     clientSocket.sendto(data_string, (str(arguments.serverip), arguments.port))
 
     # Three-way-handshake
-    time_out = .5
+    time_out = 5
     clientSocket.settimeout(time_out)
     msg = create_packet(1, 0, 8, 0, b'')  # SYN message
     clientSocket.sendto(msg, (str(arguments.serverip), arguments.port))
@@ -729,8 +723,6 @@ def client(arguments):
             header_from_msg = message[:12]
             seq, acknr, flags, win = parse_header(header_from_msg)
             syn, ack, fin = parse_flags(flags)
-            #print("\nClient: Header information from recieved SYN:ACK package:\n\tSequence number:", seq, "\n\tAcknowledgement number:", acknr,
-            #      "\n\tFlags:\n\t\tsyn:", syn, "\n\t\tack:", ack,"\n\t\tfin:", fin, "\n\tWindow size:", win)
             
             if syn > 0 and ack > 0 and fin == 0 and seq == 0 and acknr == 1: # Check if sequence number matches.
                 seq = acknr+1
@@ -746,22 +738,14 @@ def client(arguments):
     if arguments.reliability == "gbn":
             print("The client chose Go back N")
             client_go_back_n(clientSocket, arguments)
-    elif arguments.reliability == "saw":
-            print("The client chose Stop and wait")
-            client_stop_and_wait(clientSocket, arguments)
-    elif arguments.reliability == "sr":
-            print("the client chose selective repeat")
-            client_selective_repeat(clientSocket, arguments)
     
-
-    end_time = time.time()
+    end_time = time.time()  # stop timer
     elapsed_time = end_time - start_time
-    print(f"\nElapsed time: {elapsed_time:.3f} seconds.")
+    elapsed_time = end_time - start_time
+    print(f"Elapsed time: {elapsed_time:.6f} seconds.")
     try:
         pass
     finally:
-        with open('output.txt', 'rb') as output_file:
-            byte_string = output_file.read()
         file_size_bytes = os.path.getsize('output.txt')
         print("FileSize: ", file_size_bytes)
         bytes_per_second = file_size_bytes / elapsed_time
@@ -769,29 +753,18 @@ def client(arguments):
         print(f"Bytes per second: {bytes_per_second:.2f}")
         print(f"MegaBytes per second: {mBytes_per_second:.2f}")
     
-    #closing the connection gracefully
-    finalACK = clientSocket.recv(2048)
-    syn, acknr, flags, win = parse_header(finalACK[:12])
-    seq, ack, fin = parse_flags(flags)
-    if ack == 4:
-        print("\nGracefully closed the connection")
-        clientSocket.close()
-    
-    
-    
 parser = argparse.ArgumentParser(description="Optional Arguments")    #Title in the -h menu over the options available
-
 #Adds options to the program
-parser.add_argument("-s", "--server", action="store_true", help="Assigns server-mode")                                          #Server specific
-parser.add_argument("-c", "--client", action="store_true", help="Assigns client-mode")                                          #Client specific
-parser.add_argument("-p", "--port", default="8088", type=check_port, help="Allocate a port number")                             #Server and Client specific
-parser.add_argument("-I", "--serverip", type=check_ip, default="127.0.0.1", help="Set IP-address of server from client")        #Client specific
-parser.add_argument("-b", "--bind", type=check_ip, default="127.0.0.1", help="Set IP-address that client can connect to")       #Server specific
+parser.add_argument("-s", "--server", action="store_true", help="Assigns server-mode")
+parser.add_argument("-c", "--client", action="store_true", help="Assigns client-mode")
+parser.add_argument("-p", "--port", default="8088", type=check_port, help="Allocate a port number") 
+parser.add_argument("-I", "--serverip", type=check_ip, default="127.0.0.1", help="Set IP-address of server from client") 
+parser.add_argument("-b", "--bind", type=check_ip, default="127.0.0.1", help="Set IP-address that client can connect to")  
 
-parser.add_argument("-w", "--windowSize", type=check_windowSize, default=5, help="Specify window size")
-parser.add_argument("-r", "--reliability", type=str, choices=("gbn", "saw", "sr"), default=None, help="Choose reliability-mode")                #Client specific
-parser.add_argument("-f", "--file", type=check_file, default="test.txt", help="Choose file to send over")                    #Client specific
-parser.add_argument("-d", "--destination", type=str, default="output.txt", help="Choose destination file")
+parser.add_argument("-w", "--windowSize", type=int, default=5, help="Specify window size")
+parser.add_argument("-r", "--reliability", type=str, choices=("gbn", "saw", "sr"), default=None, help="Choose reliability-mode")
+parser.add_argument("-f", "--file", type=check_file, default="checkerboard.jpg", help="Choose file to send over") 
+parser.add_argument("-d", "--destination", type=str, default="output.jpg", help="Choose destination file")
 parser.add_argument("-t", "--test_case", type=str, choices=("loss", "drop_ack"), default=None, help="Choose test case")
 
 arguments=parser.parse_args()       #gathers all the options into a list
@@ -805,7 +778,7 @@ if arguments.server or arguments.client:
         server(arguments)                       #go into server mode
     if arguments.client:                        #if -c is used
         client(arguments)                       #go into client mode
-
 else:       #if neither -c or -s is used
     print("Error: you must run either in server or client mode")    #print error you must choose
     sys.exit()          #exit program   
+

@@ -186,7 +186,7 @@ def server_go_back_n(serverSocket, arguments, client_options):
                 break
             
             #PACKET LOSS GENERATOR
-            if client_options.test_case == "drop_ack" and seq == 7:   #If the client specified that it wants to deliberatley drop a package
+            if client_options.test_case == "drop_ack" and seq == 3:   #If the client specified that it wants to deliberatley drop a package
                                        
                 print("^\tThis ACK is dropped (", seq,")")     #Output print
                 continue

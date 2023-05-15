@@ -154,7 +154,6 @@ def client_stop_and_wait(clientSocket, arguments):
 
 
 ################### WILLIAM START ###################
-# SERVER ----------------------
 def server_go_back_n(serverSocket, arguments, client_options):
     print("Server Go-Back-N")
     #print("\nNew window count:  1")
@@ -179,17 +178,25 @@ def server_go_back_n(serverSocket, arguments, client_options):
             
             seq, ack, flags, win = parse_header(msg[:12])
             syn, ackflag, fin = parse_flags(flags)
-            print("HERE IS SEQ: ", seq, i)
+            #print("HERE IS SEQ: ", seq)
             window_messages[i] = msg 
             seqnr += 1
 
-            #if fin == 2:
-            #    break
-        
+            if fin == 2:
+                break
+            
+            #PACKET LOSS GENERATOR
+            if client_options.test_case == "drop_ack" and seq == 7:   #If the client specified that it wants to deliberatley drop a package
+                                       
+                print("^\tThis ACK is dropped (", seq,")")     #Output print
+                continue
+            #END PACKET LOSS GENERATOR
+            print("HERE IS SEQ: ", seq)
+
         # send cumulative acknowledgment for last received packet
         if window_messages[window_size - 1] is not None:
             seq, ack, flags, win = parse_header(window_messages[window_size - 1][:12])
-            #syn, ackflag, fin = parse_flags(flags)
+            syn, ackflag, fin = parse_flags(flags)
             ackpkt = create_packet(0, seq, 0, window_size, b'')
             serverSocket.sendto(ackpkt, reciever)
             print("Sending ACK for packet with seq up to " + str(seq))
@@ -209,7 +216,7 @@ def server_go_back_n(serverSocket, arguments, client_options):
     with open(arguments.destination, 'wb') as f:   
         for i in datalist:
             f.write(i) 
-
+        
 ### CLIENT ----------------------
 def client_go_back_n(clientSocket, arguments):
     print("Client Go-Back-N")
@@ -251,9 +258,8 @@ def client_go_back_n(clientSocket, arguments):
             clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
             print("Sent packet nr:", seq, "with window-index.", windowIndex, "\n")
             sent_packets.append((i, msg))
-            windowIndex += 1
-            
-       
+            windowIndex += 1   
+
         try:
             recpkt, reciever = clientSocket.recvfrom(2048)
             _, acknr, flags, win = parse_header(recpkt)
@@ -267,10 +273,13 @@ def client_go_back_n(clientSocket, arguments):
             print("timeout, resending window")
             print("here is seq", seq)
             seq -= 5
+
             continue
-        
+
         new_window += 1
     print("Finished sending packets\n")
+    print("Client Go-Back-N")
+
 ################# WILLIAM END ###################
 
 ################# FILIP START ##################   

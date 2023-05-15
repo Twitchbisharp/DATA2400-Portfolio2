@@ -7,6 +7,8 @@ from threading import Thread
 import pickle
 import time
 import os
+import random
+import math
 
 '''
     #Utility functions: 1) to create a packet of 1472 bytes with header (12 bytes) (sequence number, acknowledgement number,
@@ -202,7 +204,7 @@ def server_stop_and_wait(serverSocket, arguments, client_options):
             seqnum += 1
             prev_seqnum = seq
         #deliberate packet loss
-        if seq == 2:
+        if seq == 2 and client_options.test_case == "drop_ack":
                 print("\n\nDropped ACK packet for nr 2")
                 continue
 
@@ -234,17 +236,22 @@ def client_stop_and_wait(clientSocket, arguments):
         datalength += 1460
         msg = create_packet(seqnum, 0, fin, 1, b)
 
-        clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
-        print("Sent packet nr:", seqnum, "\n")
+        #deliberate packet loss
+        if seqnum == 3 and arguments.test_case == "loss":
+            print("Deliberate packet loss")
+            seqnum +=1
+        else:
+            clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
+            print("Sent packet nr:", seqnum, "\n")
         
         try:
             recpkt, reciever = clientSocket.recvfrom(2048)
             xxxyyy, acknr, flags, win = parse_header(recpkt)
-
             print("Received ACK for packet with seq " + str(seqnum))
             seqnum += 1
         except timeout:
             print("Timeout, resending packet")
+            clientSocket.sendto(msg, (str(arguments.serverip), arguments.port)) 
             continue
     print("Finished sending packets\n")
 
@@ -495,7 +502,7 @@ def client_selective_repeat(clientSocket, arguments):
     seqnr = 1           #The sequence number of a given package
     flag = True         #A flag-locker that ensures that only one packet gets dropped
     while fin != 2:     #The main while loop for client-side transmission. Stops when fin-flag is on
-        print("\n\nStart of loop", roundnr,"\nFIN-flag is currently: FIN ==", fin, "\n")        #Output print
+        print("\nStart of loop", roundnr,"\nFIN-flag is currently: FIN ==", fin, "\n")        #Output print
         sent_packets = [None] * arguments.windowSize            #Creates a list of None-elements with a length equal to the specified window size
         windowIndex = (seqnr-1)%(arguments.windowSize)          #Creates a variable for the index of where the packets shall go
         
@@ -616,46 +623,6 @@ def client_selective_repeat(clientSocket, arguments):
 
 ############### FILIP SLUTT ##################
 
-"""
-----------------------------------------------------------------------------------------------------
-CONTENT FOR READING IMAGE FILE AND EXTRACTING IT
-"""
-'''
-# Define the necessary constants
-SERVER_ADDRESS = ('localhost', 8000)
-BUFFER_SIZE = 1460  # update buffer size to 1460 bytes
-PACKET_HEADER = struct.pack('!IIHH', 0, 0, 0, 0)   # create packet header !IIHH
-MAX_PACKET_SIZE = 1472
-
-# Open the image file
-with open('filename.jpg', 'rb') as f:
-    # Read 1460 bytes from the image file
-    data = f.read(BUFFER_SIZE)
-
-    # create a packet with updated header and send it using GBN
-    seq_number = 0
-    while data:
-        payload_size = len(data)
-        if payload_size + struct.calcsize(PACKET_HEADER) > MAX_PACKET_SIZE:
-            payload_size = MAX_PACKET_SIZE - struct.calcsize(PACKET_HEADER)
-
-        # create packet with new payload
-        packet_data = PACKET_HEADER + data[:payload_size]
-        
-        # send packet using GBN
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.sendto(packet_data, SERVER_ADDRESS)
-            ack, _ = s.recvfrom(1024)
-            if ack == seq_number:
-                seq_number += 1
-                data = f.read(BUFFER_SIZE)
-        except socket.timeout:
-            pass
-        finally:
-            s.close()
-'''
-"""------------------------------------------------------------------------------------------------------------------------------------------------------------"""
 
 def check_port(val):                
     try:

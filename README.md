@@ -1,5 +1,6 @@
 README-file for application.py
 
+(This is a group project in the course DATA2400 at OsloMet -  storbyuniversitetet)
 
 -----------------------------
 HOW TO OPERATE APPLICATION.PY
